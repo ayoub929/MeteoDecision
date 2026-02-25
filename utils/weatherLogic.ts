@@ -19,7 +19,7 @@ export type HealthAdvice = {
 export function analyzeWeather(data: WeatherData): HealthAdvice {
   const { temperature, windSpeed, humidity, isRaining } = data;
   
-  let advice: HealthAdvice = {
+  const advice: HealthAdvice = {
     outfit: "",
     riskLevel: "Low",
     riskDescription: "",
