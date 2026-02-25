@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Wind, Activity, MapPin, Navigation } from "lucide-react";
+import { Search, Wind, Activity, MapPin, Navigation, LocateFixed, Info } from "lucide-react";
 import { analyzeWeather, HealthAdvice } from "@/utils/weatherLogic";
 
 // --- Configurazione Città Popolari ---
@@ -29,19 +29,24 @@ type PopularCityData = {
 };
 
 export default function Home() {
+  // Stati principali
   const [city, setCity] = useState("");
   const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-
+  
+  // Stati caricamento e risultati
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<HealthAdvice | null>(null);
   const [error, setError] = useState("");
 
+  // Stati per le città popolari
   const [popularWeather, setPopularWeather] = useState<PopularCityData[]>([]);
 
+  // Ref
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  // --- Gestione Autocomplete ---
   useEffect(() => {
     if (city.length < 3) {
       setSuggestions([]);
@@ -68,13 +73,14 @@ export default function Home() {
     };
   }, [city, showSuggestions]);
 
+  // --- Funzione Meteo (Core) ---
   const fetchWeatherForCoords = async (lat: number, lon: number) => {
     const res = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,precipitation,rain,wind_speed_10m`
     );
     const data = await res.json();
     const current = data.current;
-
+    
     return analyzeWeather({
       temperature: current.temperature_2m,
       windSpeed: current.wind_speed_10m,
@@ -83,6 +89,7 @@ export default function Home() {
     });
   };
 
+  // --- Gestione Selezione Città ---
   const handleSelectCity = async (selectedCity: CitySuggestion) => {
     setCity(`${selectedCity.name}, ${selectedCity.country}`);
     setShowSuggestions(false);
@@ -102,6 +109,7 @@ export default function Home() {
     }
   };
 
+  // --- Gestione Click Città Popolare ---
   const handlePopularCityClick = (item: PopularCityData) => {
     setCity(item.name);
     setResult(item.advice);
@@ -109,6 +117,40 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // --- NUOVA FUNZIONE: Gestione GPS ---
+  const handleGPS = () => {
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          // Impostiamo un nome generico o potremmo usare un'API di reverse geocoding
+          setCity("Your Current Location 📍"); 
+          const advice = await fetchWeatherForCoords(latitude, longitude);
+          setResult(advice);
+        } catch (e) {
+          console.error("Error fetching weather for GPS location", e);
+          setError("Failed to fetch weather for your location.");
+        } finally {
+          setLoading(false);
+        }
+      },
+      () => {
+        setError("Unable to retrieve your location. Please allow access.");
+        setLoading(false);
+      }
+    );
+  };
+
+  // --- Caricamento Iniziale ---
   useEffect(() => {
     const loadPopular = async () => {
       try {
@@ -116,14 +158,12 @@ export default function Home() {
           const advice = await fetchWeatherForCoords(city.lat, city.lon);
           return { name: city.name, advice };
         });
-
         const results = await Promise.all(promises);
         setPopularWeather(results);
       } catch (e) {
         console.error("Error loading popular cities", e);
       }
     };
-
     loadPopular();
   }, []);
 
@@ -134,6 +174,7 @@ export default function Home() {
     }
   };
 
+  // Chiudi suggerimenti al click esterno
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
@@ -146,12 +187,14 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex flex-col items-center bg-gradient-to-br from-gray-900 via-slate-800 to-black text-white p-4 overflow-x-hidden relative">
-
+      
+      {/* Background Blobs */}
       <div className="fixed top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob z-0" />
       <div className="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob animation-delay-2000 z-0" />
 
       <div className="z-10 w-full max-w-2xl mt-10 flex flex-col items-center">
-
+        
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -164,7 +207,8 @@ export default function Home() {
           <p className="text-slate-400 mt-2">Smart weather advice for your health.</p>
         </motion.div>
 
-        <div ref={searchContainerRef} className="relative w-full max-w-md mb-12">
+        {/* --- SEARCH BAR & GPS --- */}
+        <div ref={searchContainerRef} className="relative w-full max-w-md mb-8 flex flex-col gap-3">
           <form onSubmit={handleManualSearch} className="relative z-50">
             <input
               type="text"
@@ -191,13 +235,25 @@ export default function Home() {
             </button>
           </form>
 
+          {/* Tasto GPS */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleGPS}
+            className="flex items-center justify-center gap-2 py-2 px-4 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-blue-300 transition-colors w-full sm:w-auto self-center"
+          >
+            <LocateFixed size={16} />
+            <span>Use GPS 📍</span>
+          </motion.button>
+
+          {/* Dropdown Suggerimenti */}
           <AnimatePresence>
             {showSuggestions && suggestions.length > 0 && (
               <motion.ul
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="absolute w-full mt-2 bg-slate-800/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40"
+                className="absolute top-full mt-2 w-full bg-slate-800/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40"
               >
                 {suggestions.map((suggestion) => (
                   <li
@@ -217,10 +273,12 @@ export default function Home() {
           </AnimatePresence>
         </div>
 
+        {/* Error Message */}
         {error && (
           <motion.p className="text-red-400 text-center mb-4">{error}</motion.p>
         )}
 
+        {/* --- RISULTATO PRINCIPALE --- */}
         <AnimatePresence mode="wait">
           {result && (
             <motion.div
@@ -242,7 +300,7 @@ export default function Home() {
                   <span className="text-xs text-slate-400 uppercase tracking-wider">Wind</span>
                   <span className="font-semibold text-center text-sm mt-1">{result.windMessage}</span>
                 </div>
-
+                
                 <div className={`p-4 rounded-2xl flex flex-col items-center justify-center border border-white/5 ${result.riskLevel === 'High' ? 'bg-red-500/20' : 'bg-green-500/20'}`}>
                   <Activity className={result.riskLevel === 'High' ? "text-red-300" : "text-green-300"} />
                   <span className="text-xs text-slate-400 mt-2 uppercase tracking-wider">Health Risk</span>
@@ -260,12 +318,13 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        <div className="w-full max-w-4xl mt-8 mb-20">
+        {/* --- SEZIONE CITTÀ POPOLARI --- */}
+        <div className="w-full max-w-4xl mt-4 mb-20">
           <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-2 px-4">
             <Navigation size={20} className="text-blue-400" />
             Popular Cities
           </h3>
-
+          
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 px-4">
             {popularWeather.length === 0 ? (
               [...Array(6)].map((_, i) => (
@@ -295,6 +354,27 @@ export default function Home() {
                 </motion.div>
               ))
             )}
+          </div>
+        </div>
+
+        {/* --- SEZIONE ABOUT --- */}
+        <div className="w-full max-w-2xl px-4 mb-20">
+          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl p-8">
+            <h3 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+              <Info className="text-blue-400" />
+              About This Project
+            </h3>
+            <div className="space-y-4 text-slate-300 leading-relaxed">
+                <p>
+                Welcome to <strong>Outfit & Health</strong>. We believe that checking the weather should not just be about numbers—it should be about how you <em>feel</em> and prepare for the day.
+              </p>
+              <p>
+                Unlike traditional weather apps, we analyze temperature, wind chill, and humidity to calculate a personalized <strong>Health Risk Score</strong> and suggest the perfect outfit to keep you safe and comfortable.
+              </p>
+              <p className="text-sm text-slate-500 pt-4 border-t border-white/10">
+                Designed with ❤️ using Next.js, Tailwind CSS, and Open-Meteo API.
+              </p>
+            </div>
           </div>
         </div>
 
