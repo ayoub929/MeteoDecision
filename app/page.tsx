@@ -1,68 +1,152 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Wind, Thermometer, Droplets, Activity } from "lucide-react";
-import { analyzeWeather, HealthAdvice } from "@/utils/weatherLogic"; // Ensure path is correct
+import { Search, Wind, Activity, MapPin, Navigation } from "lucide-react";
+import { analyzeWeather, HealthAdvice } from "@/utils/weatherLogic";
+
+// --- Configurazione Città Popolari ---
+const POPULAR_CITIES = [
+  { name: "Washington D.C.", lat: 38.8951, lon: -77.0364 },
+  { name: "Tokyo", lat: 35.6895, lon: 139.6917 },
+  { name: "London", lat: 51.5074, lon: -0.1278 },
+  { name: "Paris", lat: 48.8566, lon: 2.3522 },
+  { name: "New York", lat: 40.7128, lon: -74.0060 },
+  { name: "Rome", lat: 41.9028, lon: 12.4964 },
+];
+
+type CitySuggestion = {
+  id: number;
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+};
 
 export default function Home() {
+  // Stati principali
   const [city, setCity] = useState("");
+  const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  
+  // Stati caricamento e risultati
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<HealthAdvice | null>(null);
   const [error, setError] = useState("");
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!city) return;
+  // Stati per le città popolari
+  const [popularWeather, setPopularWeather] = useState<{ name: string; advice: HealthAdvice }[]>([]);
 
+  // Ref per il debounce (ritardo nella ricerca)
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // --- 1. Gestione Autocomplete ---
+  useEffect(() => {
+    if (city.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+
+    // Se stiamo già caricando o abbiamo appena selezionato, evitiamo di cercare
+    if (!showSuggestions) return;
+
+    // Cancelliamo il timer precedente se l'utente sta ancora scrivendo
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    // Impostiamo un nuovo timer (300ms di attesa)
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=5&language=en&format=json`
+        );
+        const data = await res.json();
+        if (data.results) {
+          setSuggestions(data.results);
+        } else {
+          setSuggestions([]);
+        }
+      } catch (e) {
+        console.error("Error fetching suggestions", e);
+      }
+    }, 300);
+
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
+  }, [city, showSuggestions]);
+
+  // --- 2. Funzione per ottenere il meteo (Riutilizzabile) ---
+  const fetchWeatherForCoords = async (lat: number, lon: number) => {
+    const res = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,precipitation,rain,wind_speed_10m`
+    );
+    const data = await res.json();
+    const current = data.current;
+    
+    return analyzeWeather({
+      temperature: current.temperature_2m,
+      windSpeed: current.wind_speed_10m,
+      humidity: current.relative_humidity_2m,
+      isRaining: current.rain > 0,
+    });
+  };
+
+  // --- 3. Gestione Selezione Città ---
+  const handleSelectCity = async (selectedCity: CitySuggestion) => {
+    setCity(`${selectedCity.name}, ${selectedCity.country}`);
+    setShowSuggestions(false); // Nascondi suggerimenti
     setLoading(true);
     setError("");
     setResult(null);
 
     try {
-      // 1. Geocoding (Get Lat/Lon from City Name)
-      const geoRes = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=1&language=en&format=json`
-      );
-      const geoData = await geoRes.json();
-
-      if (!geoData.results) {
-        throw new Error("City not found");
-      }
-
-      const { latitude, longitude } = geoData.results[0];
-
-      // 2. Get Weather Data
-      const weatherRes = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,is_day,precipitation,rain,wind_speed_10m`
-      );
-      const weatherData = await weatherRes.json();
-      const current = weatherData.current;
-
-      // 3. Analyze
-      const advice = analyzeWeather({
-        temperature: current.temperature_2m,
-        windSpeed: current.wind_speed_10m,
-        humidity: current.relative_humidity_2m,
-        isRaining: current.rain > 0,
-      });
-
+      const advice = await fetchWeatherForCoords(selectedCity.latitude, selectedCity.longitude);
       setResult(advice);
     } catch (err) {
-      setError("Could not fetch weather data. Please try again.");
+      setError("Could not fetch weather data.");
     } finally {
       setLoading(false);
     }
   };
 
+  // --- 4. Caricamento Città Popolari (All'avvio) ---
+  useEffect(() => {
+    const loadPopular = async () => {
+      try {
+        const promises = POPULAR_CITIES.map(async (city) => {
+          const advice = await fetchWeatherForCoords(city.lat, city.lon);
+          return { name: city.name, advice };
+        });
+        
+        const results = await Promise.all(promises);
+        setPopularWeather(results);
+      } catch (e) {
+        console.error("Error loading popular cities", e);
+      }
+    };
+
+    loadPopular();
+  }, []);
+
+  // Gestione submit manuale (invio con Enter)
+  const handleManualSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Se ci sono suggerimenti, prendiamo il primo
+    if (suggestions.length > 0) {
+      handleSelectCity(suggestions[0]);
+    }
+  };
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 via-slate-800 to-black text-white p-4 overflow-hidden relative">
+    <main className="min-h-screen flex flex-col items-center bg-gradient-to-br from-gray-900 via-slate-800 to-black text-white p-4 overflow-x-hidden relative">
       
       {/* Background Ambient Blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob animation-delay-2000" />
+      <div className="fixed top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob z-0" />
+      <div className="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob animation-delay-2000 z-0" />
 
-      <div className="z-10 w-full max-w-md">
+      <div className="z-10 w-full max-w-2xl mt-10 flex flex-col items-center">
+        
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -75,46 +159,66 @@ export default function Home() {
           <p className="text-slate-400 mt-2">Smart weather advice for your health.</p>
         </motion.div>
 
-        {/* Search Bar */}
-        <motion.form
-          onSubmit={handleSearch}
-          className="relative mb-8"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          <input
-            type="text"
-            placeholder="Enter city (e.g., London, New York)"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            className="w-full px-6 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-lg"
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="absolute right-2 top-2 p-2 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50"
-          >
-            {loading ? (
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Search size={20} />
+        {/* --- SEARCH BAR CON AUTOCOMPLETE --- */}
+        <div className="relative w-full max-w-md mb-12">
+          <form onSubmit={handleManualSearch} className="relative z-50">
+            <input
+              type="text"
+              placeholder="Search city..."
+              value={city}
+              onChange={(e) => {
+                setCity(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              className="w-full px-6 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-lg"
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="absolute right-2 top-2 p-2 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Search size={20} />
+              )}
+            </button>
+          </form>
+
+          {/* Dropdown Suggerimenti */}
+          <AnimatePresence>
+            {showSuggestions && suggestions.length > 0 && (
+              <motion.ul
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute w-full mt-2 bg-slate-800/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40"
+              >
+                {suggestions.map((suggestion) => (
+                  <li
+                    key={suggestion.id}
+                    onClick={() => handleSelectCity(suggestion)}
+                    className="px-6 py-3 hover:bg-white/10 cursor-pointer flex items-center gap-3 transition-colors border-b border-white/5 last:border-0"
+                  >
+                    <MapPin size={16} className="text-blue-400" />
+                    <div>
+                      <span className="font-medium text-white">{suggestion.name}</span>
+                      <span className="text-xs text-slate-400 ml-2">{suggestion.country}</span>
+                    </div>
+                  </li>
+                ))}
+              </motion.ul>
             )}
-          </button>
-        </motion.form>
+          </AnimatePresence>
+        </div>
 
         {/* Error Message */}
         {error && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-red-400 text-center mb-4"
-          >
-            {error}
-          </motion.p>
+          <motion.p className="text-red-400 text-center mb-4">{error}</motion.p>
         )}
 
-        {/* Results Card */}
+        {/* --- RISULTATO PRINCIPALE --- */}
         <AnimatePresence mode="wait">
           {result && (
             <motion.div
@@ -123,32 +227,29 @@ export default function Home() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ type: "spring", stiffness: 200, damping: 20 }}
-              className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl"
+              className="w-full max-w-md bg-white/10 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl mb-16"
             >
-              {/* Main Outfit Advice */}
               <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold mb-2">{result.outfit}</h2>
+                <h2 className="text-3xl font-bold mb-2 leading-tight">{result.outfit}</h2>
                 <p className="text-slate-300">{result.tempMessage}</p>
               </div>
 
-              {/* Grid Stats */}
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-white/5 p-4 rounded-2xl flex flex-col items-center justify-center border border-white/5">
                   <Wind className="text-blue-300 mb-2" />
-                  <span className="text-sm text-slate-400">Wind</span>
-                  <span className="font-semibold text-center text-sm">{result.windMessage}</span>
+                  <span className="text-xs text-slate-400 uppercase tracking-wider">Wind</span>
+                  <span className="font-semibold text-center text-sm mt-1">{result.windMessage}</span>
                 </div>
                 
                 <div className={`p-4 rounded-2xl flex flex-col items-center justify-center border border-white/5 ${result.riskLevel === 'High' ? 'bg-red-500/20' : 'bg-green-500/20'}`}>
                   <Activity className={result.riskLevel === 'High' ? "text-red-300" : "text-green-300"} />
-                  <span className="text-sm text-slate-400 mt-2">Health Risk</span>
-                  <span className="font-bold">{result.riskLevel}</span>
+                  <span className="text-xs text-slate-400 mt-2 uppercase tracking-wider">Health Risk</span>
+                  <span className="font-bold mt-1">{result.riskLevel}</span>
                 </div>
               </div>
 
-              {/* Health Context */}
               <div className="bg-white/5 p-4 rounded-2xl border-l-4 border-blue-500">
-                <h3 className="text-sm font-bold text-blue-300 mb-1 uppercase tracking-wider">Health Insight</h3>
+                <h3 className="text-xs font-bold text-blue-300 mb-1 uppercase tracking-wider">Health Insight</h3>
                 <p className="text-sm text-slate-300 leading-relaxed">
                   {result.riskDescription}
                 </p>
@@ -156,6 +257,46 @@ export default function Home() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* --- SEZIONE CITTÀ POPOLARI --- */}
+        <div className="w-full max-w-4xl mt-8 mb-20">
+          <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-2 px-4">
+            <Navigation size={20} className="text-blue-400" />
+            Popular Cities
+          </h3>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 px-4">
+            {popularWeather.length === 0 ? (
+              // Scheletro di caricamento
+              [...Array(6)].map((_, i) => (
+                <div key={i} className="h-32 bg-white/5 rounded-2xl animate-pulse" />
+              ))
+            ) : (
+              popularWeather.map((item, index) => (
+                <motion.div
+                  key={item.name}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/10 p-5 rounded-2xl transition-all cursor-default group"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h4 className="font-bold text-lg">{item.name}</h4>
+                    <div className={`w-3 h-3 rounded-full ${item.advice.color}`} />
+                  </div>
+                  <p className="text-sm text-slate-300 line-clamp-2 mb-3 h-10">
+                    {item.advice.outfit}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Activity size={12} />
+                    <span>Risk: {item.advice.riskLevel}</span>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </div>
+        </div>
+
       </div>
     </main>
   );
