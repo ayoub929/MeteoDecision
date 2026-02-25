@@ -27,168 +27,248 @@ export default function Home() {
   // Stati principali
   const [city, setCity] = useState("");
   const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  "use client";
+
+  import { useState, useEffect, useRef } from "react";
+  import { motion, AnimatePresence } from "framer-motion";
+  import { Search, Wind, Activity, MapPin, Navigation } from "lucide-react";
+  import { analyzeWeather, HealthAdvice } from "@/utils/weatherLogic";
+
+  // --- Configurazione Città Popolari ---
+  const POPULAR_CITIES = [
+    { name: "Washington D.C.", lat: 38.8951, lon: -77.0364 },
+    { name: "Tokyo", lat: 35.6895, lon: 139.6917 },
+    { name: "London", lat: 51.5074, lon: -0.1278 },
+    { name: "Paris", lat: 48.8566, lon: 2.3522 },
+    { name: "New York", lat: 40.7128, lon: -74.0060 },
+    { name: "Rome", lat: 41.9028, lon: 12.4964 },
+  ];
+
+  type CitySuggestion = {
+    id: number;
+    name: string;
+    country: string;
+    latitude: number;
+    longitude: number;
+  };
+
+  type PopularCityData = {
+    name: string;
+    advice: HealthAdvice;
+  };
+
+  export default function Home() {
+    // Stati principali
+    const [city, setCity] = useState("");
+    const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
   
-  // Stati caricamento e risultati
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<HealthAdvice | null>(null);
-  const [error, setError] = useState("");
+    // Stati caricamento e risultati
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState<HealthAdvice | null>(null);
+    const [error, setError] = useState("");
 
-  // Stati per le città popolari
-  const [popularWeather, setPopularWeather] = useState<{ name: string; advice: HealthAdvice }[]>([]);
+    // Stati per le città popolari
+    const [popularWeather, setPopularWeather] = useState<PopularCityData[]>([]);
 
-  // Ref per il debounce (ritardo nella ricerca)
-  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+    // Ref per il debounce e per il click esterno
+    const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+    const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // --- 1. Gestione Autocomplete ---
-  useEffect(() => {
-    if (city.length < 3) {
-      setSuggestions([]);
-      return;
-    }
-
-    // Se stiamo già caricando o abbiamo appena selezionato, evitiamo di cercare
-    if (!showSuggestions) return;
-
-    // Cancelliamo il timer precedente se l'utente sta ancora scrivendo
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
-    // Impostiamo un nuovo timer (300ms di attesa)
-    searchTimeout.current = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=5&language=en&format=json`
-        );
-        const data = await res.json();
-        if (data.results) {
-          setSuggestions(data.results);
-        } else {
-          setSuggestions([]);
-        }
-      } catch (e) {
-        console.error("Error fetching suggestions", e);
+    // --- Gestione Autocomplete ---
+    useEffect(() => {
+      if (city.length < 3) {
+        setSuggestions([]);
+        return;
       }
-    }, 300);
+      if (!showSuggestions) return;
 
-    return () => {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    };
-  }, [city, showSuggestions]);
 
-  // --- 2. Funzione per ottenere il meteo (Riutilizzabile) ---
-  const fetchWeatherForCoords = async (lat: number, lon: number) => {
-    const res = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,precipitation,rain,wind_speed_10m`
-    );
-    const data = await res.json();
-    const current = data.current;
+      searchTimeout.current = setTimeout(async () => {
+        try {
+          const res = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=5&language=en&format=json`
+          );
+          const data = await res.json();
+          setSuggestions(data.results || []);
+        } catch (e) {
+          console.error("Error fetching suggestions", e);
+        }
+      }, 300);
+
+      return () => {
+        if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      };
+    }, [city, showSuggestions]);
+
+    // --- Funzione per ottenere il meteo (Riutilizzabile) ---
+    const fetchWeatherForCoords = async (lat: number, lon: number) => {
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,precipitation,rain,wind_speed_10m`
+      );
+      const data = await res.json();
+      const current = data.current;
     
-    return analyzeWeather({
-      temperature: current.temperature_2m,
-      windSpeed: current.wind_speed_10m,
-      humidity: current.relative_humidity_2m,
-      isRaining: current.rain > 0,
-    });
-  };
+      return analyzeWeather({
+        temperature: current.temperature_2m,
+        windSpeed: current.wind_speed_10m,
+        humidity: current.relative_humidity_2m,
+        isRaining: current.rain > 0,
+      });
+    };
 
-  // --- 3. Gestione Selezione Città ---
-  const handleSelectCity = async (selectedCity: CitySuggestion) => {
-    setCity(`${selectedCity.name}, ${selectedCity.country}`);
-    setShowSuggestions(false); // Nascondi suggerimenti
-    setLoading(true);
-    setError("");
-    setResult(null);
+    // --- Gestione Selezione Città ---
+    const handleSelectCity = async (selectedCity: CitySuggestion) => {
+      setCity(`${selectedCity.name}, ${selectedCity.country}`);
+      setShowSuggestions(false);
+      setLoading(true);
+      setError("");
+      setResult(null);
 
-    try {
-      const advice = await fetchWeatherForCoords(selectedCity.latitude, selectedCity.longitude);
-      setResult(advice);
-    } catch (err) {
-      setError("Could not fetch weather data.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // --- 4. Caricamento Città Popolari (All'avvio) ---
-  useEffect(() => {
-    const loadPopular = async () => {
       try {
-        const promises = POPULAR_CITIES.map(async (city) => {
-          const advice = await fetchWeatherForCoords(city.lat, city.lon);
-          return { name: city.name, advice };
-        });
-        
-        const results = await Promise.all(promises);
-        setPopularWeather(results);
-      } catch (e) {
-        console.error("Error loading popular cities", e);
+        const advice = await fetchWeatherForCoords(selectedCity.latitude, selectedCity.longitude);
+        setResult(advice);
+        window.scrollTo({ top: 0, behavior: 'smooth' }); // Scrolla in cima
+      } catch (err) {
+        setError("Could not fetch weather data.");
+      } finally {
+        setLoading(false);
       }
     };
 
-    loadPopular();
-  }, []);
+    // --- NUOVA FUNZIONE: Gestione Click Città Popolare ---
+    const handlePopularCityClick = (item: PopularCityData) => {
+      setCity(item.name); // Aggiorna la barra di ricerca
+      setResult(item.advice); // Mostra subito i risultati
+      setShowSuggestions(false); // Chiudi i suggerimenti se aperti
+      window.scrollTo({ top: 0, behavior: 'smooth' }); // Scrolla in cima per vedere il risultato
+    };
 
-  // Gestione submit manuale (invio con Enter)
-  const handleManualSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Se ci sono suggerimenti, prendiamo il primo
-    if (suggestions.length > 0) {
-      handleSelectCity(suggestions[0]);
-    }
-  };
-
-  return (
-    <main className="min-h-screen flex flex-col items-center bg-gradient-to-br from-gray-900 via-slate-800 to-black text-white p-4 overflow-x-hidden relative">
-      
-      {/* Background Ambient Blobs */}
-      <div className="fixed top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob z-0" />
-      <div className="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob animation-delay-2000 z-0" />
-
-      <div className="z-10 w-full max-w-2xl mt-10 flex flex-col items-center">
+    // --- Caricamento Città Popolari (All'avvio) ---
+    useEffect(() => {
+      const loadPopular = async () => {
+        try {
+          const promises = POPULAR_CITIES.map(async (city) => {
+            const advice = await fetchWeatherForCoords(city.lat, city.lon);
+            return { name: city.name, advice };
+          });
         
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-8"
-        >
-          <h1 className="text-5xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-200 to-white">
-            Outfit & Health
-          </h1>
-          <p className="text-slate-400 mt-2">Smart weather advice for your health.</p>
-        </motion.div>
+          const results = await Promise.all(promises);
+          setPopularWeather(results);
+        } catch (e) {
+          console.error("Error loading popular cities", e);
+        }
+      };
+      loadPopular();
+    }, []);
 
-        {/* --- SEARCH BAR CON AUTOCOMPLETE --- */}
-        <div className="relative w-full max-w-md mb-12">
-          <form onSubmit={handleManualSearch} className="relative z-50">
-            <input
-              type="text"
-              placeholder="Search city..."
-              value={city}
-              onChange={(e) => {
-                setCity(e.target.value);
-                setShowSuggestions(true);
-              }}
-              onFocus={() => setShowSuggestions(true)}
-              className="w-full px-6 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-lg"
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              className="absolute right-2 top-2 p-2 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50"
-            >
-              {loading ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Search size={20} />
+    // Gestione submit manuale (invio con Enter)
+    const handleManualSearch = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (suggestions.length > 0) {
+        handleSelectCity(suggestions[0]);
+      }
+    };
+
+    // Gestione click esterno per chiudere i suggerimenti
+    useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+        if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+          setShowSuggestions(false);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    return (
+      <main className="min-h-screen flex flex-col items-center bg-gradient-to-br from-gray-900 via-slate-800 to-black text-white p-4 overflow-x-hidden relative">
+      
+        <div className="fixed top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob z-0" />
+        <div className="fixed bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-30 animate-blob animation-delay-2000 z-0" />
+
+        <div className="z-10 w-full max-w-2xl mt-10 flex flex-col items-center">
+        
+          <motion.div /* ... */ >
+            {/* Header non modificato */}
+          </motion.div>
+
+          {/* --- SEARCH BAR CON AUTOCOMPLETE --- */}
+          <div ref={searchContainerRef} className="relative w-full max-w-md mb-12">
+            <form onSubmit={handleManualSearch} className="relative z-50">
+              <input
+                type="text"
+                placeholder="Search city..."
+                value={city}
+                onChange={(e) => {
+                  setCity(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                // --- CORREZIONE BUG VISIVO ---
+                autoComplete="off"
+                className="w-full px-6 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-lg"
+              />
+              {/* ... bottone di ricerca non modificato ... */}
+            </form>
+
+            {/* Dropdown Suggerimenti */}
+            <AnimatePresence>
+              {showSuggestions && suggestions.length > 0 && (
+                <motion.ul /* ... */ >
+                  {/* ... lista suggerimenti non modificata ... */}
+                </motion.ul>
               )}
-            </button>
-          </form>
+            </AnimatePresence>
+          </div>
 
-          {/* Dropdown Suggerimenti */}
-          <AnimatePresence>
-            {showSuggestions && suggestions.length > 0 && (
+          {/* ... Error Message e RISULTATO PRINCIPALE non modificati ... */}
+        
+          {/* --- SEZIONE CITTÀ POPOLARI --- */}
+          <div className="w-full max-w-4xl mt-8 mb-20">
+            <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-2 px-4">
+              <Navigation size={20} className="text-blue-400" />
+              Popular Cities
+            </h3>
+          
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 px-4">
+              {popularWeather.length === 0 ? (
+                [...Array(6)].map((_, i) => (
+                  <div key={i} className="h-32 bg-white/5 rounded-2xl animate-pulse" />
+                ))
+              ) : (
+                popularWeather.map((item, index) => (
+                  <motion.div
+                    key={item.name}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    // --- CORREZIONE FUNZIONALITÀ ---
+                    onClick={() => handlePopularCityClick(item)}
+                    className="bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/10 p-5 rounded-2xl transition-all cursor-pointer group"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <h4 className="font-bold text-lg">{item.name}</h4>
+                      <div className={`w-3 h-3 rounded-full ${item.advice.color}`} />
+                    </div>
+                    <p className="text-sm text-slate-300 line-clamp-2 mb-3 h-10">
+                      {item.advice.outfit}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <Activity size={12} />
+                      <span>Risk: {item.advice.riskLevel}</span>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </div>
+
+        </div>
+      </main>
+    );
+  }
               <motion.ul
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
