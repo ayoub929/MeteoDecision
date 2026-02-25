@@ -190,8 +190,16 @@ export default function Home() {
 
         <div className="z-10 w-full max-w-2xl mt-10 flex flex-col items-center">
         
-          <motion.div /* ... */ >
-            {/* Header non modificato */}
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+            className="text-center mb-8"
+          >
+            <h1 className="text-5xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-200 to-white">
+              Outfit & Health
+            </h1>
+            <p className="text-slate-400 mt-2">Smart weather advice for your health.</p>
           </motion.div>
 
           {/* --- SEARCH BAR CON AUTOCOMPLETE --- */}
@@ -210,21 +218,91 @@ export default function Home() {
                 autoComplete="off"
                 className="w-full px-6 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-lg"
               />
-              {/* ... bottone di ricerca non modificato ... */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="absolute right-2 top-2 p-2 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50"
+              >
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Search size={20} />
+                )}
+              </button>
             </form>
 
             {/* Dropdown Suggerimenti */}
             <AnimatePresence>
               {showSuggestions && suggestions.length > 0 && (
-                <motion.ul /* ... */ >
-                  {/* ... lista suggerimenti non modificata ... */}
+                <motion.ul
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute w-full mt-2 bg-slate-800/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-40"
+                >
+                  {suggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.id}
+                      onClick={() => handleSelectCity(suggestion)}
+                      className="px-6 py-3 hover:bg-white/10 cursor-pointer flex items-center gap-3 transition-colors border-b border-white/5 last:border-0"
+                    >
+                      <MapPin size={16} className="text-blue-400" />
+                      <div>
+                        <span className="font-medium text-white">{suggestion.name}</span>
+                        <span className="text-xs text-slate-400 ml-2">{suggestion.country}</span>
+                      </div>
+                    </li>
+                  ))}
                 </motion.ul>
               )}
             </AnimatePresence>
           </div>
 
-          {/* ... Error Message e RISULTATO PRINCIPALE non modificati ... */}
-        
+          {/* Error Message */}
+          {error && (
+            <motion.p className="text-red-400 text-center mb-4">{error}</motion.p>
+          )}
+
+          {/* --- RISULTATO PRINCIPALE --- */}
+          <AnimatePresence mode="wait">
+            {result && (
+              <motion.div
+                key="result"
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                className="w-full max-w-md bg-white/10 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl mb-16"
+              >
+                <div className="text-center mb-8">
+                  <h2 className="text-3xl font-bold mb-2 leading-tight">{result.outfit}</h2>
+                  <p className="text-slate-300">{result.tempMessage}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-white/5 p-4 rounded-2xl flex flex-col items-center justify-center border border-white/5">
+                    <Wind className="text-blue-300 mb-2" />
+                    <span className="text-xs text-slate-400 uppercase tracking-wider">Wind</span>
+                    <span className="font-semibold text-center text-sm mt-1">{result.windMessage}</span>
+                  </div>
+                
+                  <div className={`p-4 rounded-2xl flex flex-col items-center justify-center border border-white/5 ${result.riskLevel === 'High' ? 'bg-red-500/20' : 'bg-green-500/20'}`}>
+                    <Activity className={result.riskLevel === 'High' ? "text-red-300" : "text-green-300"} />
+                    <span className="text-xs text-slate-400 mt-2 uppercase tracking-wider">Health Risk</span>
+                    <span className="font-bold mt-1">{result.riskLevel}</span>
+                  </div>
+                </div>
+
+                <div className="bg-white/5 p-4 rounded-2xl border-l-4 border-blue-500">
+                  <h3 className="text-xs font-bold text-blue-300 mb-1 uppercase tracking-wider">Health Insight</h3>
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    {result.riskDescription}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* --- SEZIONE CITTÀ POPOLARI --- */}
           <div className="w-full max-w-4xl mt-8 mb-20">
             <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-2 px-4">
@@ -244,7 +322,6 @@ export default function Home() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.1 }}
-                    // --- CORREZIONE FUNZIONALITÀ ---
                     onClick={() => handlePopularCityClick(item)}
                     className="bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/10 p-5 rounded-2xl transition-all cursor-pointer group"
                   >
